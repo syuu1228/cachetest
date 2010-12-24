@@ -102,9 +102,25 @@ int main(void)
 				return obj_fd;
 			}
 				
-			obj = mmap(0, OBJ_SIZE, PROT_WRITE, MAP_SHARED, obj_fd,
+			obj = mmap(0, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, obj_fd,
 					   0);
-
+			if (!obj) {
+				perror("mmap");
+				close(obj_fd);
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
+			
+			if(recv_obj(client_fd, obj, OBJ_SIZE, 0)) {
+				perror("recv");
+				munmap(obj, OBJ_SIZE);
+				close(obj_fd);
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
+			
 			munmap(obj, OBJ_SIZE);
 			close(obj_fd);
 
