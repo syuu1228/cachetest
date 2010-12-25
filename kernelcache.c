@@ -54,7 +54,7 @@ int main(void)
 		char obj_name[100] = {0,};
 
 		client_fd = accept(bind_fd, (struct sockaddr *)&client_addr,
-						   &client_addr_len);
+				   &client_addr_len);
 		if (client_fd < 0) {
 			perror("accept");
 			close(bind_fd);
@@ -75,7 +75,7 @@ int main(void)
 			off_t off;
 			
 			obj_fd = open(obj_name, O_RDONLY);
-			if (!obj_fd) {
+			if (obj_fd < 0) {
 				perror("open");
 				return obj_fd;
 			}
@@ -96,15 +96,19 @@ int main(void)
 		case P_TYPE_PUT: {
 			char *obj;
 			
-			obj_fd = open(obj_name, O_WRONLY|O_CREAT);
-			if (!obj_fd) {
+			obj_fd = open(obj_name, O_RDWR|O_CREAT);
+			if (obj_fd < 0) {
 				perror("open");
 				return obj_fd;
 			}
-				
-			obj = mmap(0, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, obj_fd,
+			if (ftruncate(obj_fd, OBJ_SIZE)) {
+			  perror("ftruncate");
+			  close(obj_fd);
+			  return -1;
+			}
+			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, obj_fd,
 					   0);
-			if (!obj) {
+			if ((int)obj == -1) {
 				perror("mmap");
 				close(obj_fd);
 				close(bind_fd);

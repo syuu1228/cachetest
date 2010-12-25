@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 	}
 
 	fd = open("/dev/sda", O_RDONLY);
-	if (!fd) {
+	if (fd < 0) {
 		perror("open");
 		return fd;
 	}
