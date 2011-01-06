@@ -9,6 +9,7 @@
 
 #define P_TYPE_GET (0)
 #define P_TYPE_PUT (1)
+#define P_TYPE_DUMP (2)
 
 struct packet {
 	uint32_t p_type;

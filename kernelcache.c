@@ -13,7 +13,8 @@ static const long nr_regions = 160;
 static size_t page_size;
 static unsigned char *mincore_vec;
 
-size_t fincore(int fd) {
+static size_t fincore(int fd)
+{
 	void *file_mmap;
 	size_t page_index;
 	size_t cached = 0;
@@ -118,7 +119,7 @@ int main(void)
 				return obj_fd;
 			}
 			cachemiss += OBJ_SIZE - fincore(obj_fd);
-			printf("cachemiss: %zd\n", cachemiss);
+
 			if((siz = sendfile(client_fd, obj_fd, &off, OBJ_SIZE))
 			   != OBJ_SIZE) {
 				perror("sendfile");
@@ -166,6 +167,10 @@ int main(void)
 			close(obj_fd);
 
 			break;
+		}
+		case P_TYPE_DUMP: {
+			printf("Total: cachemiss:%zd/%zd %f%%\n",
+				   cachemiss, POOL_SIZE, ((double)cachemiss/(double)POOL_SIZE)*100);
 		}
 		default:
 			fprintf(stderr, "illigual type\n");
