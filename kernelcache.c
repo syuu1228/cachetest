@@ -14,6 +14,7 @@ int main(void)
 	int bind_fd;
 	unsigned optval = 1;
 	struct sockaddr_in bind_addr;
+	int page_size = getpagesize();
 
 	if (mlockall(MCL_CURRENT | MCL_FUTURE)) {
 		perror("mlockall");
@@ -68,11 +69,12 @@ int main(void)
 			close(client_fd);
 			return -1;
 		}
-		printf("p_type:%d p_seq:%d\n", p.p_type, p.p_seq);
-		snprintf(obj_name, sizeof(obj_name), "obj_%d", p.p_seq);
 		switch(p.p_type) {
 		case P_TYPE_GET: {
 			off_t off;
+			char *obj;
+			char mincore_vec[OBJ_SIZE + page_size - 1 / page_size];
+			int i, cachemiss = 0;
 			
 			obj_fd = open(obj_name, O_RDONLY);
 			if (obj_fd < 0) {
@@ -80,6 +82,30 @@ int main(void)
 				return obj_fd;
 			}
 
+			obj = mmap(NULL, OBJ_SIZE, PROT_READ, MAP_SHARED, obj_fd, 0);
+			if (obj == MAP_FAILED) {
+				perror("mmap");
+				close(obj_fd);
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
+
+			if (mincore(obj, OBJ_SIZE, mincore_vec)) {
+				perror("mincore");
+				munmap(obj, OBJ_SIZE);
+				close(obj_fd);
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
+			for (i = 0; i <= OBJ_SIZE/page_size; i++) {
+				if (!(mincore_vec[i] & 1))
+					cachemiss++;
+			}
+			
+			munmap(obj, OBJ_SIZE);
+			
 			off = 0;
 			if((siz = sendfile(client_fd, obj_fd, &off, OBJ_SIZE))
 			   != OBJ_SIZE) {
@@ -90,6 +116,7 @@ int main(void)
 				return -1;
 			}
 			close(obj_fd);
+			printf("%s: %d\n", obj_name, cachemiss);
 			
 			break;
 		}
@@ -106,9 +133,9 @@ int main(void)
 			  close(obj_fd);
 			  return -1;
 			}
-			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, obj_fd,
-					   0);
-			if ((int)obj == -1) {
+			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED,
+					   obj_fd, 0);
+			if (obj == MAP_FAILED) {
 				perror("mmap");
 				close(obj_fd);
 				close(bind_fd);
