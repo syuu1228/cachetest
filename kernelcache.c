@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 #include "common.h"
 
 static const long nr_regions = 160;
@@ -17,10 +18,37 @@ static unsigned char *mincore_vec;
 struct access_log {
 	int nreq;
 	long long unsigned hit;
+	long sectors_read;
 };
 
 static struct access_log global_log = {0,};
 static struct access_log obj_log[NUM_OBJ] = {{0,}};
+
+static long get_sectors_read(FILE *fp, int disk)
+{
+	char buf[255], *p;
+	int i;
+	
+	while(fgets(buf, 255, fp)) {
+		if(disk-- > 0)
+			continue;
+		p = strtok(buf, " ");
+		if (!p) {
+			fprintf(stderr, "strtok failed\n");
+			return -1;
+		}
+		for(i = 2; i <= 6; i++) {
+			p = strtok(NULL, " ");
+			if (!p) {
+				fprintf(stderr, "strtok failed\n");
+				return -1;
+			}
+		}
+		rewind(fp);
+		return atol(p);
+	}
+	return -1;
+}
 
 static size_t fincore(int fd)
 {
@@ -53,16 +81,34 @@ cleanup:
 static void print_access_log(struct access_log *log)
 {
 	long long unsigned received = log->nreq * (long long unsigned)OBJ_SIZE;
-	printf("req:%d hit:%llu/%llu %f%%\n",
+	printf("req:%d hit:%llu/%llu %f%% sectors_read:%ld\n",
 		   log->nreq, log->hit, received,
-		   ((double)log->hit/(double)received)*100);
+		   ((double)log->hit/(double)received)*100,
+		   log->sectors_read);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	int bind_fd;
 	unsigned optval = 1;
 	struct sockaddr_in bind_addr;
+	FILE *diskstats;	
+	int disk;
+
+	if (argc < 2) {
+		fprintf(stderr, "more arguments required\n");
+		return -1;
+	}
+		
+	disk = atoi(argv[1]);
+	if (disk < 0) {
+		fprintf(stderr, "bad argument\n");
+		return -1;
+	}
+	
+	diskstats = fopen("/proc/diskstats", "r");
+	if (!diskstats)
+		return -1;
 	
 	page_size = getpagesize();
 	mincore_vec = calloc(1, (OBJ_SIZE+page_size-1)/page_size);
@@ -129,12 +175,23 @@ int main(void)
 		case P_TYPE_GET: {
 			off_t off = 0;
 			unsigned long long cached;
+			long sec_begin, sec_end;
+
+			sec_begin = get_sectors_read(diskstats, disk);
+			if (sec_begin < 0) {
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
 
 			obj_fd = open(obj_name, O_RDONLY);
 			if (obj_fd < 0) {
 				perror("open");
+				close(bind_fd);
+				close(client_fd);
 				return obj_fd;
 			}
+			
 			cached = fincore(obj_fd);
 			global_log.nreq++;
 			global_log.hit += cached;
@@ -149,7 +206,19 @@ int main(void)
 				close(client_fd);
 				return -1;
 			}
+			
 			close(obj_fd);
+			
+			sec_end = get_sectors_read(diskstats, disk);
+			if (sec_begin < 0) {
+				close(obj_fd);
+				close(bind_fd);
+				close(client_fd);
+				return -1;
+			}
+
+			global_log.sectors_read += sec_end - sec_begin;
+			obj_log[p.p_seq].sectors_read += sec_end - sec_begin;
 			break;
 		}
 		case P_TYPE_PUT: {
