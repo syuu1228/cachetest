@@ -9,13 +9,51 @@
 #include <fcntl.h>
 #include "common.h"
 
+static const long nr_regions = 160;
+static size_t page_size;
+static unsigned char *mincore_vec;
+
+size_t fincore(int fd) {
+	void *file_mmap;
+	size_t page_index;
+	size_t cached = 0;
+
+	file_mmap = mmap((void *)0, OBJ_SIZE, PROT_NONE, MAP_SHARED, fd, 0 );
+	if ( file_mmap == MAP_FAILED ) {
+		perror( "mmap failed" );
+		goto cleanup;      
+	}
+
+	if ( mincore(file_mmap, OBJ_SIZE, mincore_vec) != 0 ) {
+		perror( "mincore" );
+		exit( 1 );
+	}
+
+	for (page_index = 0; page_index <= OBJ_SIZE/page_size; page_index++)
+		if (mincore_vec[page_index]&1)
+			++cached;
+
+cleanup:
+	if ( file_mmap != MAP_FAILED )
+		munmap(file_mmap, OBJ_SIZE);
+
+	return (size_t)((long)cached * (long)page_size);
+}
+
 int main(void)
 {
 	int bind_fd;
 	unsigned optval = 1;
 	struct sockaddr_in bind_addr;
-	int page_size = getpagesize();
-
+	size_t cachemiss = 0;
+	
+	page_size = getpagesize();
+	mincore_vec = calloc(1, (OBJ_SIZE+page_size-1)/page_size);
+	if ( mincore_vec == NULL ) {
+		perror( "Could not calloc" );
+		exit( 1 );
+	}
+	
 	if (mlockall(MCL_CURRENT | MCL_FUTURE)) {
 		perror("mlockall");
 		return -1;
@@ -69,44 +107,18 @@ int main(void)
 			close(client_fd);
 			return -1;
 		}
+		snprintf(obj_name, sizeof(obj_name), "obj_%d", p.p_seq);
 		switch(p.p_type) {
 		case P_TYPE_GET: {
-			off_t off;
-			char *obj;
-			char mincore_vec[OBJ_SIZE + page_size - 1 / page_size];
-			int i, cachemiss = 0;
-			
+			off_t off = 0;
+
 			obj_fd = open(obj_name, O_RDONLY);
 			if (obj_fd < 0) {
 				perror("open");
 				return obj_fd;
 			}
-
-			obj = mmap(NULL, OBJ_SIZE, PROT_READ, MAP_SHARED, obj_fd, 0);
-			if (obj == MAP_FAILED) {
-				perror("mmap");
-				close(obj_fd);
-				close(bind_fd);
-				close(client_fd);
-				return -1;
-			}
-
-			if (mincore(obj, OBJ_SIZE, mincore_vec)) {
-				perror("mincore");
-				munmap(obj, OBJ_SIZE);
-				close(obj_fd);
-				close(bind_fd);
-				close(client_fd);
-				return -1;
-			}
-			for (i = 0; i <= OBJ_SIZE/page_size; i++) {
-				if (!(mincore_vec[i] & 1))
-					cachemiss++;
-			}
-			
-			munmap(obj, OBJ_SIZE);
-			
-			off = 0;
+			cachemiss += OBJ_SIZE - fincore(obj_fd);
+			printf("cachemiss: %zd\n", cachemiss);
 			if((siz = sendfile(client_fd, obj_fd, &off, OBJ_SIZE))
 			   != OBJ_SIZE) {
 				perror("sendfile");
@@ -116,8 +128,6 @@ int main(void)
 				return -1;
 			}
 			close(obj_fd);
-			printf("%s: %d\n", obj_name, cachemiss);
-			
 			break;
 		}
 		case P_TYPE_PUT: {
@@ -164,5 +174,11 @@ int main(void)
 	}
 
 	close(bind_fd);
+	if ( mincore_vec != NULL ) {
+		free(mincore_vec);
+		mincore_vec = NULL;
+	}
+	
+	
 	return 0;
 }
