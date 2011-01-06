@@ -8,15 +8,13 @@
 #include <fcntl.h>
 #include "common.h"
 
-#define NUM_REQS (5 * 1024)
-
 int main(int argc, char **argv)
 {
 	char *mem_pool;
 	int i, fd;
 	struct sockaddr_in addr;
 
-	if (argc != 3) {
+	if (argc < 4) {
 		fprintf(stderr, "argument required\n");
 		return -1;
 	}
@@ -34,6 +32,11 @@ int main(int argc, char **argv)
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(SERVER_PORT);
 	addr.sin_addr.s_addr = inet_addr(argv[1]);
+	FILE *fp = fopen(argv[3], "r");
+	if (!fp) {
+		perror("fopen");
+		return -1;
+	}
 
 	if (!strcmp(argv[2], "put")) {
 		fd = open("/dev/sda", O_RDONLY);
@@ -50,14 +53,18 @@ int main(int argc, char **argv)
 	
 		close(fd);
 
-		for (i = 0; i < NUM_OBJ; i++) {
+		for (;;) {
 			struct packet p;
 			ssize_t siz;
 			char *obj;
+			char buf[256];
+
+			if (!fgets(buf, sizeof(buf), fp))
+				break;
 
 			p.p_type = P_TYPE_PUT;
-			p.p_seq = i;
-			obj = mem_pool + (OBJ_SIZE * i);
+			p.p_seq = atoi(buf);
+			obj = mem_pool + (OBJ_SIZE * p.p_seq);
 
 			if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 				perror("socket");
@@ -86,25 +93,20 @@ int main(int argc, char **argv)
 
 			close(fd);
 		}
-	}else if (!strcmp(argv[2], "get_rand")) {
-		int schedule[NUM_REQS];
-
-		for (i = 0; i < NUM_REQS; i++) {
-			srand(i);
-			schedule[i] = rand() % NUM_OBJ;
-			printf("[%d] obj_%d\n", i, schedule[i]);
-		}
-		
-		for (i = 0; i < NUM_REQS; i++) {
+	}else if (!strcmp(argv[2], "get")) {
+		for(;;) {
 			struct packet p;
 			ssize_t siz;
 			char *obj;
 			char buf[OBJ_SIZE];
 			int ret;
-		
+
+			if (!fgets(buf, OBJ_SIZE, fp))
+				break;
+			
 			p.p_type = P_TYPE_GET;
-			p.p_seq = schedule[i];
-			obj = mem_pool + (OBJ_SIZE * schedule[i]);
+			p.p_seq = atoi(buf);
+			obj = mem_pool + (OBJ_SIZE * p.p_seq);
 
 			if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 				perror("socket");
@@ -134,8 +136,7 @@ int main(int argc, char **argv)
 		
 			close(fd);
 		}
-	}else if (!strcmp(argv[2], "get_zipfs")) {
-		double percentages[NUM_OBJ];
-		
 	}
+	fclose(fp);
+
 }
