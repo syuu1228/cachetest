@@ -76,6 +76,8 @@ int main(int argc, char **argv)
 			p.p_seq = atoi(buf);
 			obj = mem_pool + (OBJ_SIZE * p.p_seq);
 
+			printf("%d\n", p.p_seq);
+			
 			if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 				perror("socket");
 				return -1;
@@ -124,11 +126,13 @@ int main(int argc, char **argv)
 
 			if (!fgets(buf, OBJ_SIZE, fp))
 				break;
-			
+
 			p.p_type = P_TYPE_GET;
 			p.p_seq = atoi(buf);
 			obj = mem_pool + (OBJ_SIZE * p.p_seq);
 
+			printf("%d\n", p.p_seq);
+			
 			if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 				perror("socket");
 				return -1;
