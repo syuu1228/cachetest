@@ -90,7 +90,6 @@ int main(int argc, char **argv)
 			if ((siz = send(fd, &p, sizeof(struct packet), MSG_MORE))
 				!= sizeof(struct packet)) {
 				perror("send");
-				printf("siz:%zd actual:%zd\n", siz, sizeof(struct packet));
 				close(fd);
 				return -1;
 			}
@@ -144,7 +143,6 @@ int main(int argc, char **argv)
 			if ((siz = send(fd, &p, sizeof(struct packet), 0))
 				!= sizeof(struct packet)) {
 				perror("send");
-				printf("siz:%zd actual:%zd\n", siz, sizeof(struct packet));
 				close(fd);
 				return -1;
 			}
