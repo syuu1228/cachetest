@@ -401,28 +401,9 @@ int main(int argc, char **argv)
 				perror("ftruncate");
 				exit(1);
 			}
-#ifdef MLOCKCACHE_KEEP_PUT
-			if (cache_size + OBJ_SIZE > CACHE_MAX) {
-				if (LIST_NEXT(&least_access, list) &&
-					LIST_NEXT(&least_access, list)->nreq <= log->nreq) {
-					while (LIST_NEXT(&least_access, list) &&
-						   cache_size + OBJ_SIZE > CACHE_MAX)
-						cache_purge(LIST_NEXT(&least_access, list));
-					cache_mark(obj_fd, log, PROT_READ|PROT_WRITE, POSIX_FADV_WILLNEED);
-				}
-			}else{
-				cache_mark(obj_fd, log, PROT_READ|PROT_WRITE, POSIX_FADV_WILLNEED);
-			}
-			log->last_access = time(NULL);
-			
-			if (!log->name)
-				log->name = strdup(obj_name);
-			
-			obj = log->obj;
-#else
 			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED,
 					   obj_fd, 0);
-#endif
+
 			if (obj == MAP_FAILED) {
 				perror("mmap");
 				exit(1);
@@ -433,9 +414,7 @@ int main(int argc, char **argv)
 				exit(1);
 			}
 
-#ifndef MLOCKCACHE_KEEP_PUT
 			munmap(obj, OBJ_SIZE);
-#endif
 			close(obj_fd);
 
 			break;
