@@ -1,6 +1,8 @@
-OBJS = fadvcache kernelcache mlockcache
+OBJS = fadvcache kernelcache mlockcache client
 CFLAGS = -Wall -Werror -g
 all: $(OBJS)
+client:
+	$(CC) $(CFLAGS) -o client client.c
 kernelcache:
 	$(CC) $(CFLAGS) -o kernelcache kernelcache.c
 fadvcache:

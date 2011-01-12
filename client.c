@@ -5,13 +5,16 @@
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 #include "common.h"
 
 int main(int argc, char **argv)
 {
 	char *mem_pool;
-	int i, fd;
+	int fd;
 	struct sockaddr_in addr;
 
 	if (argc < 3) {
@@ -119,7 +122,6 @@ int main(int argc, char **argv)
 			ssize_t siz;
 			char *obj;
 			char buf[OBJ_SIZE];
-			int ret;
 
 			if (!fgets(buf, OBJ_SIZE, fp))
 				break;
@@ -181,7 +183,7 @@ int main(int argc, char **argv)
 			close(fd);
 			return -1;
 		}
-		
 		close(fd);
 	}
+	return 0;
 }
