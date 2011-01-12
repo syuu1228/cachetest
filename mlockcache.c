@@ -9,20 +9,32 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 #include "common.h"
+#include "list.h"
+
+#define CACHE_MAX (200 * 1000 * 1000)
 
 static const long nr_regions = 160;
 static size_t page_size;
 static unsigned char *mincore_vec;
 
 struct access_log {
+	LIST_ENTRY(access_log) list;
+	char *name;
 	int nreq;
 	long long unsigned hit;
 	long sectors_read;
+	int on_cache;
+	time_t last_access;
+	void *obj;
 };
 
-static struct access_log global_log = {0,};
-static struct access_log obj_log[NUM_OBJ] = {{0,}};
+static struct access_log global_log = {{0,},};
+static struct access_log obj_log[NUM_OBJ] = {{{0,},}};
+
+static long long unsigned cache_size = 0;
+struct access_log least_access = {{0,}, };
 
 static long get_sectors_read(FILE *fp, int disk)
 {
@@ -50,16 +62,18 @@ static long get_sectors_read(FILE *fp, int disk)
 	return -1;
 }
 
-static size_t fincore(int fd)
+static size_t fincore(int fd, void *obj)
 {
-	void *file_mmap;
+	void *file_mmap = obj;
 	size_t page_index;
 	size_t cached = 0;
 
-	file_mmap = mmap((void *)0, OBJ_SIZE, PROT_NONE, MAP_SHARED, fd, 0 );
-	if ( file_mmap == MAP_FAILED ) {
-		perror( "mmap failed" );
-		goto cleanup;      
+	if (!file_mmap) {
+		file_mmap = mmap((void *)0, OBJ_SIZE, PROT_NONE, MAP_SHARED, fd, 0 );
+		if ( file_mmap == MAP_FAILED ) {
+			perror( "mmap failed" );
+			goto cleanup;      
+		}
 	}
 
 	if ( mincore(file_mmap, OBJ_SIZE, mincore_vec) != 0 ) {
@@ -72,7 +86,7 @@ static size_t fincore(int fd)
 			++cached;
 
 cleanup:
-	if ( file_mmap != MAP_FAILED )
+	if ( !obj && file_mmap != MAP_FAILED )
 		munmap(file_mmap, OBJ_SIZE);
 
 	return (size_t)((long)cached * (long)page_size);
@@ -81,10 +95,97 @@ cleanup:
 static void print_access_log(struct access_log *log)
 {
 	long long unsigned received = log->nreq * (long long unsigned)OBJ_SIZE;
-	printf("req:%d hit:%llu/%llu %f%% sectors_read:%ld\n",
-		   log->nreq, log->hit, received,
+	printf("%s name:%s req:%d hit:%llu/%llu %f%% sectors_read:%ld last_access:%ld\n",
+		   log->on_cache ? "*" : " ", log->name, log->nreq, log->hit, received,
 		   ((double)log->hit/(double)received)*100,
-		   log->sectors_read);
+		   log->sectors_read, log->last_access);
+}
+
+static void update_least_access(struct access_log *log)
+{
+	struct access_log *lp;
+	if (!LIST_NEXT(&least_access, list)) {
+		LIST_INSERT_AFTER(&least_access, log, list);
+	}else{
+		LIST_FOREACH(lp, log, list) {
+			if (LIST_NEXT(lp, list) == NULL ||
+				LIST_NEXT(lp, list)->nreq > log->nreq) {
+				LIST_REMOVE(log, list);
+				LIST_INSERT_AFTER(lp, log, list);
+				break;
+			}
+		}
+	}
+}
+
+static int cache_mark(int fd, struct access_log *log, int flag)
+{
+	struct access_log *lp;
+
+	if (flag == POSIX_FADV_WILLNEED) {
+		log->obj = mmap(NULL, OBJ_SIZE, PROT_READ, MAP_SHARED | MAP_LOCKED, fd, 0);
+		if (log->obj == MAP_FAILED) {
+			perror("mmap");
+			return -1;
+		}
+	}else{
+		if (munmap(log->obj, OBJ_SIZE)) {
+			perror("munmap");
+			return -1;
+		}
+		if (posix_fadvise(fd, 0, OBJ_SIZE, POSIX_FADV_DONTNEED)) {
+			perror("posix_fadvise");
+			return -1;
+		}
+	}
+	
+	if (flag == POSIX_FADV_WILLNEED) {
+		printf("fadvise(%s, WILLNEED) cache_size:%llu\n", log->name, cache_size);
+		cache_size += OBJ_SIZE;
+		log->on_cache = 1;
+		if (!LIST_NEXT(&least_access, list)) {
+			LIST_INSERT_AFTER(&least_access, log, list);
+		}else{
+			LIST_FOREACH(lp, &least_access, list) {
+				if (!LIST_NEXT(lp, list) ||
+					LIST_NEXT(lp, list)->nreq > log->nreq) {
+					LIST_INSERT_AFTER(lp, log, list);
+					break;
+				}
+			}
+		}
+	}else if (flag == POSIX_FADV_DONTNEED) {
+		printf("fadvise(%s, DONTNEED) cache_size:%llu\n", log->name, cache_size);
+	}
+
+	return 0;
+}
+
+static int cache_purge(struct access_log *log)
+{
+	struct access_log *lp = log;
+
+	int fd = open(lp->name, O_RDONLY);
+
+	if (munmap(log->obj, OBJ_SIZE)) {
+		perror("munmap");
+		return -1;
+	}	  
+	if (posix_fadvise(fd, 0, OBJ_SIZE,
+					  POSIX_FADV_DONTNEED)) {
+		perror("posix_fadvise");
+		close(fd);
+		return -1;
+	}
+
+	printf("fadvise(%s, DONTNEED)\n", lp->name);
+	cache_size -= OBJ_SIZE;
+	lp->on_cache = 0;
+	LIST_REMOVE(lp, list);
+
+	close(fd);
+
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -177,6 +278,12 @@ int main(int argc, char **argv)
 			off_t off = 0;
 			unsigned long long cached;
 			long sec_begin, sec_end;
+			struct access_log *log = &obj_log[p.p_seq];
+
+			log->last_access = time(NULL);
+			
+			if (!log->name)
+				log->name = strdup(obj_name);
 
 			sec_begin = get_sectors_read(diskstats, disk);
 			if (sec_begin < 0) {
@@ -193,11 +300,11 @@ int main(int argc, char **argv)
 				return obj_fd;
 			}
 			
-			cached = fincore(obj_fd);
+			cached = fincore(obj_fd, log->obj);
 			global_log.nreq++;
 			global_log.hit += cached;
-			obj_log[p.p_seq].nreq++;
-			obj_log[p.p_seq].hit += cached;
+			log->nreq++;
+			log->hit += cached;
 
 			if((siz = sendfile(client_fd, obj_fd, &off, OBJ_SIZE))
 			   != OBJ_SIZE) {
@@ -206,6 +313,25 @@ int main(int argc, char **argv)
 				close(bind_fd);
 				close(client_fd);
 				return -1;
+			}
+			close(client_fd);
+
+			if (!log->on_cache) {
+				if (log->nreq > 1) {
+					if (cache_size + OBJ_SIZE > CACHE_MAX) {
+						if (LIST_NEXT(&least_access, list)->nreq < log->nreq) {
+							while (cache_size + OBJ_SIZE > CACHE_MAX)
+								cache_purge(LIST_NEXT(&least_access, list));
+							cache_mark(obj_fd, log, POSIX_FADV_WILLNEED);
+						}
+					}else{
+						cache_mark(obj_fd, log, POSIX_FADV_WILLNEED);
+					}
+				}else{
+					cache_mark(obj_fd, log, POSIX_FADV_DONTNEED);
+				}
+			}else if(log->on_cache) {
+				update_least_access(log);
 			}
 			
 			close(obj_fd);
@@ -219,7 +345,8 @@ int main(int argc, char **argv)
 			}
 
 			global_log.sectors_read += sec_end - sec_begin;
-			obj_log[p.p_seq].sectors_read += sec_end - sec_begin;
+			log->sectors_read += sec_end - sec_begin;
+			
 			break;
 		}
 		case P_TYPE_PUT: {
@@ -253,6 +380,7 @@ int main(int argc, char **argv)
 				close(client_fd);
 				return -1;
 			}
+			close(client_fd);
 			
 			munmap(obj, OBJ_SIZE);
 			close(obj_fd);
@@ -260,17 +388,17 @@ int main(int argc, char **argv)
 			break;
 		}
 		case P_TYPE_DUMP: {
-			int i, j, max = 0;
+			close(client_fd);
+			int i;
+			struct access_log *lp;
 			for (i = 0; i < NUM_OBJ; i++) {
-				for(j = 0; j < NUM_OBJ; j++) {
-					if (obj_log[max].nreq < obj_log[j].nreq)
-						max = j;
-				}
-				printf("%d ", max);
-				print_access_log(&obj_log[max]);
-				obj_log[max].nreq = 0;
-				obj_log[max].hit = 0;
+				if (!obj_log[i].on_cache)
+					print_access_log(&obj_log[i]);
 			}
+
+			LIST_FOREACH(lp, &least_access, list)
+				print_access_log(lp);
+
 			printf("\nglobal:\n");
 			print_access_log(&global_log);
 			break;
@@ -278,7 +406,6 @@ int main(int argc, char **argv)
 		default:
 			fprintf(stderr, "illigual type\n");
 		}
-		close(client_fd);
 	}
 
 	close(bind_fd);

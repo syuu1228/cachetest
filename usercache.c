@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -51,7 +52,8 @@ int main(void)
 	
 	while (1) {
 		struct sockaddr_in client_addr;
-		int client_fd, client_addr_len = sizeof(struct sockaddr_in);
+		int client_fd;
+		socklen_t client_addr_len = sizeof(struct sockaddr_in);
 		struct packet p;
 		char *obj;
 		ssize_t siz;
