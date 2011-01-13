@@ -434,6 +434,8 @@ int main(int argc, char **argv)
 				print_access_log(max, &obj_log[max]);
 				obj_log[max].dumped  = 1;
 			}
+			for (i = 0; i < NUM_OBJ; i++)
+				obj_log[i].dumped = 0;
 			printf("\nglobal:\n");
 			print_access_log(0, &global_log);
 			break;

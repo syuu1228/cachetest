@@ -2,8 +2,8 @@
 #define _COMMON_H_
 #include <stdint.h>
 
-#define OBJ_SIZE (1024 * 1024) /* 1MB */
-#define NUM_OBJ (1024)
+#define OBJ_SIZE (100 * 1024) /* 1MB */
+#define NUM_OBJ (10240)
 #define POOL_SIZE (OBJ_SIZE * NUM_OBJ) /* 1GB */
 #define SERVER_PORT (10000)
 
