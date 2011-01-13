@@ -420,9 +420,11 @@ int main(int argc, char **argv)
 			break;
 		}
 		case P_TYPE_DUMP: {
+			int i;
+			
 			print_header();
 			for(;;) {
-				int i, max = -1;
+				int max = -1;
 				for(i = 0; i < NUM_OBJ; i++) {
 					if (obj_log[i].dumped)
 						continue;
