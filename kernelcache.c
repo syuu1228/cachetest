@@ -10,12 +10,14 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <proc/sysinfo.h>
 #include "common.h"
 #include "list.h"
 
 static const long nr_regions = 160;
 static size_t page_size;
 static unsigned char *mincore_vec;
+static unsigned long cache_max;
 
 struct access_log {
 	char *name;
@@ -280,6 +282,13 @@ int main(int argc, char **argv)
 		fprintf(stderr, "bad argument\n");
 		exit(1);
 	}
+
+	meminfo();
+	cache_max = ((kb_main_free << 10) + (kb_main_cached << 10)) * 8 / 10; 
+	printf("free:%luMB cached:%luMB cache_max:%luMB\n",
+		   (kb_main_free << 10) >> 20,
+		   (kb_main_cached << 10) >> 20,
+		   cache_max >> 20);
 	
 	diskstats = fopen("/proc/diskstats", "r");
 	if (!diskstats) {
@@ -392,12 +401,12 @@ int main(int argc, char **argv)
 #if defined(FADVCACHE) || defined(MLOCKCACHE)
 			if (!log->on_cache) {
 				if (log->nreq > 1) {
-					if (cache_size + OBJ_SIZE > CACHE_MAX) {
+					if (cache_size + OBJ_SIZE > cache_max) {
 						if (LIST_NEXT(&least_access, list) &&
 							access_log_less_equal(
 								LIST_NEXT(&least_access, list), log)) {
 							while (LIST_NEXT(&least_access, list) &&
-								   cache_size + OBJ_SIZE > CACHE_MAX)
+								   cache_size + OBJ_SIZE > cache_max)
 								cache_purge(LIST_NEXT(&least_access, list));
 							cache_mark(obj_fd, log, PROT_READ,
 									   POSIX_FADV_WILLNEED);
