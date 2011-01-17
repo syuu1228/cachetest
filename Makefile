@@ -1,13 +1,17 @@
-OBJS = fadvcache kernelcache mlockcache client
+OBJS = kernelcache fadvcache_lru mlockcache_lru fadvcache_la mlockcache_la client
 CFLAGS = -Wall -Werror -g
 all: $(OBJS)
-client:
-	$(CC) $(CFLAGS) -o client client.c
-kernelcache:
-	$(CC) $(CFLAGS) -o kernelcache kernelcache.c
-fadvcache:
-	$(CC) $(CFLAGS) -o fadvcache kernelcache.c -DFADVCACHE
-mlockcache:
-	$(CC) $(CFLAGS) -o mlockcache kernelcache.c -DMLOCKCACHE
+client: client.c
+	$(CC) $(CFLAGS) -o $@ $<
+kernelcache: kernelcache.c
+	$(CC) $(CFLAGS) -o $@ $< -DARGO_LEAST_ACCESS
+fadvcache_lru: kernelcache.c
+	$(CC) $(CFLAGS) -o $@ $< -DFADVCACHE -DARGO_LRU
+fadvcache_la: kernelcache.c
+	$(CC) $(CFLAGS) -o $@ $< -DFADVCACHE -DARGO_LEAST_ACCESS
+mlockcache_lru: kernelcache.c
+	$(CC) $(CFLAGS) -o $@ $< -DMLOCKCACHE -DARGO_LRU
+mlockcache_la: kernelcache.c
+	$(CC) $(CFLAGS) -o $@ $< -DMLOCKCACHE -DARGO_LEAST_ACCESS
 clean:
 	rm -fv $(OBJS)

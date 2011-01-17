@@ -11,11 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include "common.h"
-#if defined(FADVCACHE) || defined(MLOCKCACHE)
 #include "list.h"
-
-#define CACHE_MAX (200 * 1000 * 1000)
-#endif
 
 static const long nr_regions = 160;
 static size_t page_size;
@@ -43,6 +39,42 @@ static struct access_log obj_log[NUM_OBJ] = {{0,}};
 #if defined(FADVCACHE) || defined(MLOCKCACHE)
 static long long unsigned cache_size = 0;
 static struct access_log least_access = {0,};
+#endif
+
+#if defined(ARGO_LEAST_ACCESS)
+static inline int access_log_greater_than(struct access_log *al1,
+										  struct access_log *al2)
+{
+	return al1->nreq > al2->nreq;
+}
+static inline int access_log_less_than(struct access_log *al1,
+									   struct access_log *al2)
+{
+	return al1->nreq < al2->nreq;
+}
+static inline int access_log_less_equal(struct access_log *al1,
+										struct access_log *al2)
+{
+	return al1->nreq <= al2->nreq;
+}
+#elif defined(ARGO_LRU)
+static inline int access_log_greater_than(struct access_log *al1,
+										  struct access_log *al2)
+{
+	return al1->last_access > al2->last_access;
+}
+static inline int access_log_less_than(struct access_log *al1,
+									   struct access_log *al2)
+{
+	return al1->last_access < al2->last_access;
+}
+static inline int access_log_less_equal(struct access_log *al1,
+										struct access_log *al2)
+{
+	return al1->last_access <= al2->last_access;
+}
+#else
+#error "algorithm not selected"
 #endif
 
 static long get_sectors_read(FILE *fp, int disk)
@@ -114,8 +146,8 @@ static size_t fincore(int fd)
 
 static void print_header(void)
 {
-	puts("id, name, req, hit, received, percentage, last_fincore, sectors_read, "
-		 "last_access"
+	puts("id, name, req, hit, received, percentage, last_fincore, "
+		 "sectors_read, last_access"
 #if defined(FADVCACHE) || defined(MLOCKCACHE)
 		 ", on_cache"
 #endif
@@ -151,7 +183,7 @@ static void update_least_access(struct access_log *log)
 	}else{
 		LIST_FOREACH(lp, log, list) {
 			if (LIST_NEXT(lp, list) == NULL ||
-				LIST_NEXT(lp, list)->nreq > log->nreq) {
+				access_log_greater_than(LIST_NEXT(lp, list), log)) {
 				LIST_REMOVE(log, list);
 				LIST_INSERT_AFTER(lp, log, list);
 				break;
@@ -196,7 +228,7 @@ static int cache_mark(int fd, struct access_log *log, int prot, int flag)
 		}else{
 			LIST_FOREACH(lp, &least_access, list) {
 				if (!LIST_NEXT(lp, list) ||
-					LIST_NEXT(lp, list)->nreq > log->nreq) {
+					access_log_greater_than(LIST_NEXT(lp, list), log)) {
 					LIST_INSERT_AFTER(lp, log, list);
 					break;
 				}
@@ -277,7 +309,8 @@ int main(int argc, char **argv)
 	bind_addr.sin_port = htons(SERVER_PORT);
 	bind_addr.sin_addr.s_addr = INADDR_ANY;
 
-	if (setsockopt(bind_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval))) {
+	if (setsockopt(bind_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
+				   sizeof(optval))) {
 		perror("setsockopt");
 		exit(1);
 	}
@@ -361,14 +394,17 @@ int main(int argc, char **argv)
 				if (log->nreq > 1) {
 					if (cache_size + OBJ_SIZE > CACHE_MAX) {
 						if (LIST_NEXT(&least_access, list) &&
-							LIST_NEXT(&least_access, list)->nreq <= log->nreq) {
+							access_log_less_equal(
+								LIST_NEXT(&least_access, list), log)) {
 							while (LIST_NEXT(&least_access, list) &&
 								   cache_size + OBJ_SIZE > CACHE_MAX)
 								cache_purge(LIST_NEXT(&least_access, list));
-							cache_mark(obj_fd, log, PROT_READ, POSIX_FADV_WILLNEED);
+							cache_mark(obj_fd, log, PROT_READ,
+									   POSIX_FADV_WILLNEED);
 						}
 					}else{
-						cache_mark(obj_fd, log, PROT_READ, POSIX_FADV_WILLNEED);
+						cache_mark(obj_fd, log, PROT_READ,
+								   POSIX_FADV_WILLNEED);
 					}
 				}else{
 					cache_mark(obj_fd, log, PROT_READ, POSIX_FADV_DONTNEED);
@@ -428,7 +464,9 @@ int main(int argc, char **argv)
 				for(i = 0; i < NUM_OBJ; i++) {
 					if (obj_log[i].dumped)
 						continue;
-					if (max == -1 || (max != -1 && obj_log[max].nreq < obj_log[i].nreq))
+					if (max == -1 || (max != -1 &&
+									  access_log_less_than(&obj_log[max],
+														   &obj_log[i])))
 						max = i;
 				}
 				if (max == -1)
