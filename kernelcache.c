@@ -284,7 +284,7 @@ int main(int argc, char **argv)
 	}
 
 	meminfo();
-	cache_max = ((kb_main_free << 10) + (kb_main_cached << 10)) * 8 / 10; 
+	cache_max = ((kb_main_free << 10) + (kb_main_cached << 10));
 	printf("free:%luMB cached:%luMB cache_max:%luMB\n",
 		   (kb_main_free << 10) >> 20,
 		   (kb_main_cached << 10) >> 20,
