@@ -4,9 +4,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
-#include <sys/sendfile.h>
 #include <netinet/in.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
@@ -18,7 +16,7 @@ static const long nr_regions = 160;
 static size_t page_size;
 static unsigned char *mincore_vec;
 static unsigned long cache_max;
-
+int pipefd[2];
 struct access_log {
 	char *name;
 	int nreq;
@@ -272,6 +270,11 @@ int main(int argc, char **argv)
 	FILE *diskstats;	
 	int disk;
 
+	if (pipe(pipefd) < 0) {
+		perror("pipe");
+		exit(1);
+	}
+
 	if (argc < 2) {
 		fprintf(stderr, "more arguments required\n");
 		exit(1);
@@ -360,7 +363,6 @@ int main(int argc, char **argv)
 		log = &obj_log[p.p_seq];
 		switch(p.p_type) {
 		case P_TYPE_GET: {
-			off_t off = 0;
 			unsigned long long cached;
 			long sec_begin, sec_end;
 
@@ -392,11 +394,27 @@ int main(int argc, char **argv)
 			log->hit += cached;
 			log->last_fincore = cached;
 
-			if((siz = sendfile(client_fd, obj_fd, &off, OBJ_SIZE))
-			   != OBJ_SIZE) {
-				perror("sendfile");
+#ifdef SEND_DIRECT
+			if(send_direct(client_fd, obj_fd, OBJ_SIZE) != OBJ_SIZE) {
+				perror("send_direct");
 				exit(1);
 			}
+#else
+			char *obj;
+			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED,
+					   obj_fd, 0);
+
+			if (obj == MAP_FAILED) {
+				perror("mmap");
+				exit(1);
+			}
+
+			if((siz = send_obj(client_fd, obj, (size_t)OBJ_SIZE, 0))
+			   != OBJ_SIZE) {
+				perror("send_direct");
+				exit(1);
+			}
+#endif
 
 #if defined(FADVCACHE) || defined(MLOCKCACHE)
 			if (!log->on_cache) {
@@ -434,9 +452,7 @@ int main(int argc, char **argv)
 			log->sectors_read += sec_end - sec_begin;
 			break;
 		}
-		case P_TYPE_PUT: {
-			char *obj;
-			
+		case P_TYPE_PUT: {			
 			obj_fd = open(obj_name, O_RDWR|O_CREAT);
 			if (obj_fd < 0) {
 				perror("open");
@@ -445,7 +461,14 @@ int main(int argc, char **argv)
 			if (ftruncate(obj_fd, OBJ_SIZE)) {
 				perror("ftruncate");
 				exit(1);
+			}			
+#ifdef RECV_DIRECT
+			if(recv_direct(client_fd, obj_fd, OBJ_SIZE) != OBJ_SIZE) {
+				perror("recv_direct");
+				exit(1);
 			}
+#else
+			char *obj;
 			obj = mmap(NULL, OBJ_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED,
 					   obj_fd, 0);
 
@@ -453,13 +476,13 @@ int main(int argc, char **argv)
 				perror("mmap");
 				exit(1);
 			}
-			
+
 			if(recv_obj(client_fd, obj, OBJ_SIZE, 0)) {
 				perror("recv");
 				exit(1);
 			}
-
 			munmap(obj, OBJ_SIZE);
+#endif
 			close(obj_fd);
 
 			break;
