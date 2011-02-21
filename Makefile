@@ -1,11 +1,11 @@
-OBJS = kernelcache fadvcache_lru mlockcache_lru fadvcache_la mlockcache_la client
+OBJS = kernelcache kernelcache_direct fadvcache_lru mlockcache_lru fadvcache_la mlockcache_la client
 CFLAGS = -Wall -Werror -g -lproc
 all: $(OBJS)
 client: client.c
 	$(CC) $(CFLAGS) -o $@ $<
 kernelcache: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DARGO_LEAST_ACCESS
-direct: kernelcache.c
+kernelcache_direct: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DARGO_LRU -DSEND_DIRECT -DRECV_DIRECT
 fadvcache_lru: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DFADVCACHE -DARGO_LRU

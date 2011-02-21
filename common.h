@@ -59,7 +59,7 @@ extern int pipefd[2];
 
 
 static void test_splice(int in, int out, int number_of_bytes) {
-    int rcvd = 0, sent = 0, teed = 0, remaining = number_of_bytes;
+    int rcvd = 0, sent = 0, remaining = number_of_bytes;
     int pipe1[2];
 
     if (pipe(pipe1) < 0) {
