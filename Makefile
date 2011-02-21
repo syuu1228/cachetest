@@ -5,7 +5,7 @@ client: client.c
 	$(CC) $(CFLAGS) -o $@ $<
 kernelcache: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DARGO_LEAST_ACCESS
-kernelcache_direct: kernelcache.c recvfile.c
+kernelcache_direct: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DARGO_LRU -DSEND_DIRECT -DRECV_DIRECT
 fadvcache_lru: kernelcache.c
 	$(CC) $(CFLAGS) -o $@ $< -DFADVCACHE -DARGO_LRU
