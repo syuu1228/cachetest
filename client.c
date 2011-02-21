@@ -82,14 +82,12 @@ int main(int argc, char **argv)
 				return -1;
 			}
 
-			printf("connect\n");
 			if (connect(fd, (struct sockaddr *)&addr, sizeof(addr))) {
 				perror("connect");
 				close(fd);
 				return -1;
 			}
 
-			printf("send\n");
 			if ((siz = send(fd, &p, sizeof(struct packet), MSG_MORE))
 				!= sizeof(struct packet)) {
 				perror("send");
@@ -97,7 +95,6 @@ int main(int argc, char **argv)
 				return -1;
 			}
 		
-			printf("send_obj\n");
 			if (send_obj(fd, obj, (size_t)OBJ_SIZE, 0)) {
 				perror("send");
 				close(fd);
